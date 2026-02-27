@@ -1,0 +1,9 @@
+/.idea
+/node_modules
+/packages/redis/dist
+/packages/hono/dist
+/packages/express/node_modules
+/packages/core/dist
+/packages/express/dist
+/packages/hono/node_modules
+/packages/redis/node_modules

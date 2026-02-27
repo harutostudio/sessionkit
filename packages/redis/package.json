@@ -1,0 +1,32 @@
+{
+  "name": "@sessionkit/redis",
+  "version": "0.1.0",
+  "description": "Redis store for SessionKit",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@sessionkit/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "redis": "^5.0.0"
+  }
+}
