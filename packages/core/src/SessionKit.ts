@@ -8,7 +8,7 @@ import type {
 } from "./types";
 import type { HttpContext, HttpMiddleware } from "./http/HttpContext";
 import { NoopLockProvider } from "./session/LockProvider";
-import { defaultErrorBody } from "./errors";
+import { SessionKitError, toSessionKitError } from "./errors";
 import { nowMs, secondsToMs } from "./utils/time";
 import { newSessionId } from "./utils/uuid";
 
@@ -22,8 +22,11 @@ function defaultTouchEverySeconds(opts: SessionKitOptions<any, any>): number {
     return opts.session.touchEverySeconds ?? 60;
 }
 
+function defaultRenewBeforeSeconds(opts: SessionKitOptions<any, any>): number {
+    return opts.session.renewBeforeSeconds ?? opts.session.touchEverySeconds ?? 60;
+}
+
 type InternalAuth<TPayload, TPrincipal> = AuthContext<TPayload, TPrincipal> & {
-    // internal bookkeeping
     _touchedAtMs?: number;
 };
 
@@ -38,9 +41,13 @@ export class SessionKit<TPayload, TPrincipal> {
 
     middleware(): HttpMiddleware {
         return async (ctx, next) => {
-            const auth = await this.buildAuthContext(ctx);
-            ctx.setAuth<InternalAuth<TPayload, TPrincipal>>(auth);
-            await next();
+            try {
+                const auth = await this.buildAuthContext(ctx);
+                ctx.setAuth<InternalAuth<TPayload, TPrincipal>>(auth);
+                await next();
+            } catch (error) {
+                throw toSessionKitError(error);
+            }
         };
     }
 
@@ -60,9 +67,7 @@ export class SessionKit<TPayload, TPrincipal> {
                     await this.opts.hooks.onUnauthorized(ctx);
                     return;
                 }
-                ctx.status(401);
-                ctx.json(defaultErrorBody("UNAUTHORIZED", "Authentication required."));
-                return;
+                throw new SessionKitError("UNAUTHORIZED", "Authentication required.");
             }
             await next();
         };
@@ -78,11 +83,15 @@ export class SessionKit<TPayload, TPrincipal> {
         const expiresAt = createdAt + secondsToMs(ttl);
         const sessionId = newSessionId();
 
-        await this.opts.store.set(
-            sessionId,
-            { payload, createdAt, expiresAt },
-            ttl
-        );
+        try {
+            await this.opts.store.set(
+                sessionId,
+                { payload, createdAt, expiresAt },
+                ttl
+            );
+        } catch (error) {
+            throw new SessionKitError("STORE_UNAVAILABLE", "Failed to save session.", error);
+        }
 
         const maxAgeSeconds = this.opts.cookie?.maxAgeSeconds ?? ttl;
         ctx.setCookie(this.cookieName, sessionId, { ...(this.opts.cookie ?? {}), maxAgeSeconds });
@@ -95,7 +104,6 @@ export class SessionKit<TPayload, TPrincipal> {
                 session: { payload, createdAt, expiresAt },
                 principal,
                 isAuthenticated: true,
-                _touchedAtMs: nowMs(),
             });
         }
 
@@ -107,10 +115,14 @@ export class SessionKit<TPayload, TPrincipal> {
         const sid = ctx.getCookie(this.cookieName);
 
         try {
-            if (sid) await this.opts.store.del(sid);
+            if (sid) {
+                await this.opts.store.del(sid);
+            }
         } catch (e) {
             this.opts.logger?.warn("Failed to delete session from store.", { error: e });
-            if (!alwaysClear) throw e;
+            if (!alwaysClear) {
+                throw new SessionKitError("STORE_UNAVAILABLE", "Failed to delete session.", e);
+            }
         } finally {
             ctx.clearCookie(this.cookieName, this.opts.cookie ?? {});
             ctx.setAuth<InternalAuth<TPayload, TPrincipal>>({
@@ -140,10 +152,15 @@ export class SessionKit<TPayload, TPrincipal> {
             return unauthContext();
         }
 
-        let stored = await this.opts.store.get(sid);
+        let stored: NonNullable<InternalAuth<TPayload, TPrincipal>["session"]> | null;
+        try {
+            stored = await this.opts.store.get(sid);
+        } catch (error) {
+            throw new SessionKitError("STORE_UNAVAILABLE", "Failed to read session.", error);
+        }
         if (!stored) {
-            // invalid/missing session -> optionally clear cookie
             this.opts.logger?.debug("Session not found.", { sessionId: sid });
+            ctx.clearCookie(this.cookieName, this.opts.cookie ?? {});
             if (this.opts.hooks?.onInvalidSession) {
                 await this.opts.hooks.onInvalidSession(ctx, "SESSION_NOT_FOUND");
             }
@@ -159,6 +176,7 @@ export class SessionKit<TPayload, TPrincipal> {
             }
         } catch (e) {
             this.opts.logger?.warn("Invalid session payload.", { error: e });
+            ctx.clearCookie(this.cookieName, this.opts.cookie ?? {});
             if (this.opts.hooks?.onInvalidSession) {
                 await this.opts.hooks.onInvalidSession(ctx, "INVALID_PAYLOAD");
             }
@@ -167,6 +185,7 @@ export class SessionKit<TPayload, TPrincipal> {
 
         if (nowMs() >= stored.expiresAt) {
             this.opts.logger?.debug("Session expired.", { sessionId: sid });
+            ctx.clearCookie(this.cookieName, this.opts.cookie ?? {});
             return unauthContext();
         }
 
@@ -186,8 +205,8 @@ export class SessionKit<TPayload, TPrincipal> {
 
         // rolling touch (avoid touching too frequently)
         if (this.opts.session.rolling) {
-            const touchEvery = defaultTouchEverySeconds(this.opts);
-            await this.maybeTouch(sid, touchEvery, this.opts.session.ttlSeconds, auth);
+            const renewBeforeSeconds = defaultRenewBeforeSeconds(this.opts);
+            await this.maybeTouch(sid, renewBeforeSeconds, this.opts.session.ttlSeconds, auth);
         }
 
         return auth;
@@ -266,17 +285,23 @@ export class SessionKit<TPayload, TPrincipal> {
 
     private async maybeTouch(
         sessionId: string,
-        touchEverySeconds: number,
+        renewBeforeSeconds: number,
         ttlSeconds: number,
         auth: InternalAuth<TPayload, TPrincipal>
     ): Promise<void> {
         const now = nowMs();
-        const last = auth._touchedAtMs ?? 0;
-        if (now - last < secondsToMs(touchEverySeconds)) return;
+        const expiresAt = auth.session?.expiresAt ?? 0;
+        const remainingSeconds = Math.floor((expiresAt - now) / 1000);
+        if (remainingSeconds > renewBeforeSeconds) {
+            return;
+        }
 
         try {
             if (this.opts.store.touch) {
                 await this.opts.store.touch(sessionId, ttlSeconds);
+                if (auth.session) {
+                    auth.session = { ...auth.session, expiresAt: now + secondsToMs(ttlSeconds) };
+                }
             } else {
                 const s = auth.session!;
                 await this.opts.store.set(
@@ -284,8 +309,8 @@ export class SessionKit<TPayload, TPrincipal> {
                     { ...s, expiresAt: now + secondsToMs(ttlSeconds) },
                     ttlSeconds
                 );
+                auth.session = { ...s, expiresAt: now + secondsToMs(ttlSeconds) };
             }
-            auth._touchedAtMs = now;
         } catch (e) {
             this.opts.logger?.warn("Failed to touch session TTL.", { error: e });
         }

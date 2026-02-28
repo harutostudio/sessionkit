@@ -20,6 +20,7 @@ export type SessionKitOptions<TPayload, TPrincipal> = {
         ttlSeconds: number;
         rolling?: boolean;          // default false
         touchEverySeconds?: number; // default 60
+        renewBeforeSeconds?: number; // default 60
     };
 
     principalFactory: (payload: TPayload) => TPrincipal;
