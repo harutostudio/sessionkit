@@ -14,7 +14,6 @@ export class MapSessionStore<TPayload> implements SessionStore<TPayload> {
     ) {
         const interval = (options?.cleanupIntervalSeconds ?? 60) * 1000;
         this.cleanupTimer = setInterval(() => this.cleanup(), interval);
-        // don't keep the event loop alive in tests
         this.cleanupTimer.unref?.();
     }
 
@@ -31,7 +30,6 @@ export class MapSessionStore<TPayload> implements SessionStore<TPayload> {
 
     async set(sessionId: string, value: StoredSession<TPayload>, ttlSeconds: number): Promise<void> {
         if (this.options?.maxSize && this.map.size >= this.options.maxSize) {
-            // naive eviction: cleanup first, then if still full delete a random key
             this.cleanup();
             if (this.map.size >= this.options.maxSize) {
                 const firstKey = this.map.keys().next().value as string | undefined;
@@ -54,7 +52,6 @@ export class MapSessionStore<TPayload> implements SessionStore<TPayload> {
         const now = Date.now();
         const expiresAt = now + ttlSeconds * 1000;
 
-        // keep stored session expiresAt consistent too
         e.expiresAt = expiresAt;
         e.value = { ...e.value, expiresAt };
         this.map.set(sessionId, e);

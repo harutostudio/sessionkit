@@ -9,6 +9,7 @@
   "entryPointStrategy": "resolve",
   "out": "docs/reference",
   "tsconfig": "tsconfig.json",
+  "cleanOutputDir": true,
   "excludePrivate": false,
   "excludeProtected": false,
   "excludeInternal": true,

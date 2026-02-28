@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/harutostudio/sessionkit/security/policy
+    about: Please report security vulnerabilities through the security policy.
+  - name: Support
+    url: https://github.com/harutostudio/sessionkit/blob/main/SUPPORT.md
+    about: Questions and general support go here.

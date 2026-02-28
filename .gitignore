@@ -7,4 +7,6 @@
 /packages/express/dist
 /packages/hono/node_modules
 /packages/redis/node_modules
-/docs
+/docs/reference
+/docs/.DS_Store
+/packages/core/node_modules

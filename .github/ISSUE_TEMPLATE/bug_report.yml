@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible bug in SessionKit
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened and what did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Steps, sample code, or repository to reproduce.
+      placeholder: |
+        1. Configure SessionKit with ...
+        2. Send request to ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Affected package and version
+      placeholder: "@sessionkit/core@0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Node, OS, framework/runtime version.
+      placeholder: |
+        Node: 22.13.0
+        OS: macOS 15
+        Runtime: Express 5
+    validations:
+      required: true
