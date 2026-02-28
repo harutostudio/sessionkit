@@ -2,6 +2,7 @@ export type ErrorCode =
     | "UNAUTHORIZED"
     | "INVALID_SESSION"
     | "SESSION_EXPIRED"
+    | "TOKEN_REFRESH_FAILED"
     | "LOCK_TIMEOUT"
     | "STORE_UNAVAILABLE"
     | "INTERNAL_ERROR";
@@ -60,6 +61,7 @@ export function statusFromErrorCode(code: ErrorCode): number {
         case "UNAUTHORIZED":
         case "INVALID_SESSION":
         case "SESSION_EXPIRED":
+        case "TOKEN_REFRESH_FAILED":
             return 401;
         case "STORE_UNAVAILABLE":
         case "LOCK_TIMEOUT":

@@ -18,17 +18,11 @@ function defaultCookieName(opts: SessionKitOptions<any, any>): string {
     return opts.cookie?.name ?? "sid";
 }
 
-function defaultTouchEverySeconds(opts: SessionKitOptions<any, any>): number {
-    return opts.session.touchEverySeconds ?? 60;
-}
-
 function defaultRenewBeforeSeconds(opts: SessionKitOptions<any, any>): number {
     return opts.session.renewBeforeSeconds ?? opts.session.touchEverySeconds ?? 60;
 }
 
-type InternalAuth<TPayload, TPrincipal> = AuthContext<TPayload, TPrincipal> & {
-    _touchedAtMs?: number;
-};
+type InternalAuth<TPayload, TPrincipal> = AuthContext<TPayload, TPrincipal>;
 
 export class SessionKit<TPayload, TPrincipal> {
     private readonly cookieName: string;
@@ -52,7 +46,7 @@ export class SessionKit<TPayload, TPrincipal> {
     }
 
     optionalAuth(): HttpMiddleware {
-        return async (_ctx, next) => next();
+        return this.middleware();
     }
 
     requireAuth(options?: RequireAuthOptions): HttpMiddleware {
@@ -123,15 +117,15 @@ export class SessionKit<TPayload, TPrincipal> {
             if (!alwaysClear) {
                 throw new SessionKitError("STORE_UNAVAILABLE", "Failed to delete session.", e);
             }
-        } finally {
-            ctx.clearCookie(this.cookieName, this.opts.cookie ?? {});
-            ctx.setAuth<InternalAuth<TPayload, TPrincipal>>({
-                sessionId: null,
-                session: null,
-                principal: null,
-                isAuthenticated: false,
-            });
         }
+
+        ctx.clearCookie(this.cookieName, this.opts.cookie ?? {});
+        ctx.setAuth<InternalAuth<TPayload, TPrincipal>>({
+            sessionId: null,
+            session: null,
+            principal: null,
+            isAuthenticated: false,
+        });
     }
 
     getAuth(ctx: HttpContext): AuthContext<TPayload, TPrincipal> {
@@ -231,7 +225,12 @@ export class SessionKit<TPayload, TPrincipal> {
                 `sessionkit:refresh:${sessionId}`,
                 TOKEN_REFRESH_LOCK_TTL_SECONDS,
                 async () => {
-                    const latest = await this.opts.store.get(sessionId);
+                    let latest;
+                    try {
+                        latest = await this.opts.store.get(sessionId);
+                    } catch (storeError) {
+                        throw new SessionKitError("STORE_UNAVAILABLE", "Failed to read session.", storeError);
+                    }
                     if (!latest) {
                         return null;
                     }
@@ -244,7 +243,12 @@ export class SessionKit<TPayload, TPrincipal> {
                         return latest;
                     }
 
-                    const refreshed = await token.refresh(latest.payload);
+                    let refreshed;
+                    try {
+                        refreshed = await token.refresh(latest.payload);
+                    } catch (refreshError) {
+                        throw new SessionKitError("TOKEN_REFRESH_FAILED", "Failed to refresh token.", refreshError);
+                    }
                     const ttlSeconds = refreshed.ttlSeconds ?? this.opts.session.ttlSeconds;
                     const nextStored = {
                         ...latest,
@@ -252,12 +256,21 @@ export class SessionKit<TPayload, TPrincipal> {
                         expiresAt: nowMs() + secondsToMs(ttlSeconds),
                     };
 
-                    await this.opts.store.set(sessionId, nextStored, ttlSeconds);
+                    try {
+                        await this.opts.store.set(sessionId, nextStored, ttlSeconds);
+                    } catch (storeError) {
+                        throw new SessionKitError("STORE_UNAVAILABLE", "Failed to save session.", storeError);
+                    }
                     return nextStored;
                 }
             );
         } catch (error) {
-            await this.handleRefreshFailure(ctx, sessionId, error);
+            const normalized = toSessionKitError(error);
+            if (normalized.code !== "TOKEN_REFRESH_FAILED") {
+                throw normalized;
+            }
+
+            await this.handleRefreshFailure(ctx, sessionId, normalized);
             return null;
         }
     }
