@@ -1,6 +1,8 @@
 import {
   defaultErrorBody,
+  isSessionKitError,
   SessionKitError,
+  statusFromErrorCode,
   type HttpContext,
   type HttpMiddleware,
 } from "@sessionkit/core";
@@ -143,23 +145,4 @@ export function toHonoMiddleware(
 
 function toCookieSerializeOptions(value: Record<string, unknown>): Parameters<typeof serializeCookie>[2] {
   return value as Parameters<typeof serializeCookie>[2];
-}
-
-function isSessionKitError(error: unknown): error is SessionKitError {
-  return error instanceof SessionKitError;
-}
-
-function statusFromErrorCode(code: string): number {
-  switch (code) {
-    case "UNAUTHORIZED":
-    case "INVALID_SESSION":
-    case "SESSION_EXPIRED":
-      return 401;
-    case "STORE_UNAVAILABLE":
-    case "LOCK_TIMEOUT":
-      return 503;
-    case "INTERNAL_ERROR":
-    default:
-      return 500;
-  }
 }
