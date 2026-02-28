@@ -8,12 +8,18 @@ import {
 } from "./internal/redisClient";
 import type { RedisSessionStore } from "./RedisSessionStore";
 
+/**
+ * Configuration for {@link RedisLockProvider}.
+ */
 export type RedisLockProviderOptions = {
   keyPrefix?: string;
   acquireTimeoutMs?: number;
   retryDelayMs?: number;
 };
 
+/**
+ * Accepted constructor input for {@link RedisLockProvider}.
+ */
 export type RedisLockProviderInput =
   | RedisConnectionInput
   | {
@@ -24,6 +30,9 @@ const DEFAULT_KEY_PREFIX = "sessionkit:lock:";
 const DEFAULT_ACQUIRE_TIMEOUT_MS = 5000;
 const DEFAULT_RETRY_DELAY_MS = 50;
 
+/**
+ * Redis-based distributed lock provider used by SessionKit refresh flows.
+ */
 export class RedisLockProvider implements LockProvider {
   private readonly keyPrefix: string;
   private readonly acquireTimeoutMs: number;

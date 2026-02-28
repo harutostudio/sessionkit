@@ -1,3 +1,6 @@
+/**
+ * Cookie configuration shared by SessionKit core and adapters.
+ */
 export type CookieOptions = {
     name?: string; // default "sid"
     path?: string; // default "/"
@@ -13,6 +16,9 @@ function isTokenChar(ch: string): boolean {
     return /^[A-Za-z0-9!#$%&'*+\-.^_`|~]$/.test(ch);
 }
 
+/**
+ * Parses a raw Cookie header into a key/value map.
+ */
 export function parseCookieHeader(cookieHeader: string | null | undefined): Record<string, string> {
     const out: Record<string, string> = {};
     if (!cookieHeader) return out;
@@ -33,6 +39,9 @@ export function parseCookieHeader(cookieHeader: string | null | undefined): Reco
     return out;
 }
 
+/**
+ * Serializes a Set-Cookie header value.
+ */
 export function serializeSetCookie(
     name: string,
     value: string,
@@ -63,6 +72,9 @@ export function serializeSetCookie(
     return segments.join("; ");
 }
 
+/**
+ * Serializes a clearing Set-Cookie header (`Max-Age=0`).
+ */
 export function serializeClearCookie(name: string, options: CookieOptions): string {
     // Max-Age=0 clears cookie
     return serializeSetCookie(name, "", { ...options, maxAgeSeconds: 0 });

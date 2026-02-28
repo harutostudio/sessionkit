@@ -2,7 +2,7 @@
   "name": "@sessionkit/hono",
   "version": "0.1.0",
   "description": "Hono adapter for SessionKit",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",

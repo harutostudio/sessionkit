@@ -2,6 +2,9 @@ import type { SessionStore, StoredSession } from "./SessionStore";
 
 type Entry<T> = { value: StoredSession<T>; expiresAt: number };
 
+/**
+ * In-memory {@link SessionStore} intended for local development and tests.
+ */
 export class MapSessionStore<TPayload> implements SessionStore<TPayload> {
     private readonly map = new Map<string, Entry<TPayload>>();
     private readonly cleanupTimer: NodeJS.Timeout | null;

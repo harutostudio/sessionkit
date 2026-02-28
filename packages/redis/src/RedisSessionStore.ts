@@ -8,11 +8,17 @@ import {
   setWithTtl,
 } from "./internal/redisClient";
 
+/**
+ * Codec contract for custom session payload serialization in Redis.
+ */
 export type SessionCodec<TPayload> = {
   serialize: (value: StoredSession<TPayload>) => string;
   deserialize: (raw: string) => StoredSession<TPayload>;
 };
 
+/**
+ * Configuration for {@link RedisSessionStore}.
+ */
 export type RedisSessionStoreOptions<TPayload> = {
   keyPrefix?: string;
   codec?: SessionCodec<TPayload>;
@@ -20,6 +26,9 @@ export type RedisSessionStoreOptions<TPayload> = {
 
 const DEFAULT_KEY_PREFIX = "sessionkit:sess:";
 
+/**
+ * Redis-backed implementation of SessionKit `SessionStore`.
+ */
 export class RedisSessionStore<TPayload> implements SessionStore<TPayload> {
   private readonly keyPrefix: string;
   private readonly codec: SessionCodec<TPayload>;
@@ -81,6 +90,9 @@ export class RedisSessionStore<TPayload> implements SessionStore<TPayload> {
     await this.clientManager.close();
   }
 
+  /**
+   * Exposes internal client manager so lock provider can reuse connections.
+   */
   getClientManager(): RedisClientManager {
     return this.clientManager;
   }

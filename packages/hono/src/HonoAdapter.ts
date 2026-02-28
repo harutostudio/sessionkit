@@ -9,8 +9,14 @@ import {
 import type { Context, MiddlewareHandler } from "hono";
 import { parse as parseCookie, serialize as serializeCookie } from "cookie";
 
+/**
+ * Context key used to store SessionKit auth data on Hono context.
+ */
 export const SESSIONKIT_HONO_AUTH_KEY = "auth";
 
+/**
+ * Adapter options for Hono integration.
+ */
 export type SessionKitHonoAdapterOptions = {
   onError?: (error: SessionKitError, c: Context) => Promise<Response | void> | Response | void;
 };
@@ -19,6 +25,9 @@ type HonoHttpContext = HttpContext & {
   _getDirectResponse: () => Response | null;
 };
 
+/**
+ * Creates a framework-neutral `HttpContext` from Hono context.
+ */
 export function createHonoHttpContext(c: Context): HttpContext {
   let statusCode = 200;
   let directResponse: Response | null = null;
@@ -96,6 +105,9 @@ export function createHonoHttpContext(c: Context): HttpContext {
   return ctx;
 }
 
+/**
+ * Converts core middleware into a Hono middleware handler.
+ */
 export function toHonoMiddleware(
   middleware: HttpMiddleware,
   options?: SessionKitHonoAdapterOptions,

@@ -1,5 +1,8 @@
 import type { CookieOptions } from "../cookie/CookieCodec";
 
+/**
+ * Framework-neutral HTTP context required by SessionKit.
+ */
 export interface HttpContext {
     // Cookie I/O
     getCookie(name: string): string | null;
@@ -15,4 +18,7 @@ export interface HttpContext {
     json(body: unknown): void;
 }
 
+/**
+ * Middleware function signature used by SessionKit core.
+ */
 export type HttpMiddleware = (ctx: HttpContext, next: () => Promise<void>) => Promise<void>;

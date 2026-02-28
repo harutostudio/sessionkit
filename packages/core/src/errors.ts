@@ -1,3 +1,6 @@
+/**
+ * Stable error codes surfaced by SessionKit core and adapters.
+ */
 export type ErrorCode =
     | "UNAUTHORIZED"
     | "INVALID_SESSION"
@@ -7,6 +10,9 @@ export type ErrorCode =
     | "STORE_UNAVAILABLE"
     | "INTERNAL_ERROR";
 
+/**
+ * Canonical error type used across SessionKit packages.
+ */
 export class SessionKitError extends Error {
     readonly details: Record<string, unknown> | undefined;
 
@@ -22,6 +28,9 @@ export class SessionKitError extends Error {
     }
 }
 
+/**
+ * JSON-safe error response shape used by adapters.
+ */
 export type ErrorBody = {
     error: {
         code: ErrorCode;
@@ -29,6 +38,9 @@ export type ErrorBody = {
     };
 };
 
+/**
+ * Logger contract used by SessionKit core for optional diagnostics.
+ */
 export type Logger = {
     debug(msg: string, meta?: unknown): void;
     info(msg: string, meta?: unknown): void;
@@ -36,14 +48,23 @@ export type Logger = {
     error(msg: string, meta?: unknown): void;
 };
 
+/**
+ * Creates a normalized error response body.
+ */
 export function defaultErrorBody(code: ErrorCode, message: string): ErrorBody {
     return { error: { code, message } };
 }
 
+/**
+ * Type guard for {@link SessionKitError}.
+ */
 export function isSessionKitError(error: unknown): error is SessionKitError {
     return error instanceof SessionKitError;
 }
 
+/**
+ * Converts unknown errors into {@link SessionKitError}.
+ */
 export function toSessionKitError(error: unknown): SessionKitError {
     if (isSessionKitError(error)) {
         return error;
@@ -56,6 +77,9 @@ export function toSessionKitError(error: unknown): SessionKitError {
     return new SessionKitError("INTERNAL_ERROR", "Unexpected internal error.", error);
 }
 
+/**
+ * Maps {@link ErrorCode} to an HTTP status code.
+ */
 export function statusFromErrorCode(code: ErrorCode): number {
     switch (code) {
         case "UNAUTHORIZED":

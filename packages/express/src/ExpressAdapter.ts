@@ -8,11 +8,17 @@ import {
 } from "@sessionkit/core";
 import { parse as parseCookie, serialize as serializeCookie } from "cookie";
 
+/**
+ * Minimal request shape required by SessionKit Express adapter.
+ */
 export type SessionKitExpressRequest = {
   headers: Record<string, string | string[] | undefined>;
   auth?: unknown;
 };
 
+/**
+ * Minimal response shape required by SessionKit Express adapter.
+ */
 export type SessionKitExpressResponse = {
   status(code: number): unknown;
   json(body: unknown): unknown;
@@ -21,16 +27,25 @@ export type SessionKitExpressResponse = {
 };
 
 export type SessionKitExpressNext = (error?: unknown) => void;
+/**
+ * Async middleware handler returned by SessionKit Express adapter.
+ */
 export type SessionKitExpressHandler = (
   req: SessionKitExpressRequest,
   res: SessionKitExpressResponse,
   next: SessionKitExpressNext,
 ) => Promise<void>;
 
+/**
+ * Adapter options for Express integration.
+ */
 export type SessionKitExpressAdapterOptions = {
   onError?: (error: SessionKitError, req: SessionKitExpressRequest, res: SessionKitExpressResponse) => Promise<void> | void;
 };
 
+/**
+ * Creates a framework-neutral `HttpContext` from Express request/response.
+ */
 export function createExpressHttpContext(req: SessionKitExpressRequest, res: SessionKitExpressResponse): HttpContext {
   return {
     getCookie(name: string): string | null {
@@ -97,6 +112,9 @@ export function createExpressHttpContext(req: SessionKitExpressRequest, res: Ses
   };
 }
 
+/**
+ * Converts core middleware into an Express-compatible middleware function.
+ */
 export function toExpressMiddleware(
   middleware: HttpMiddleware,
   options?: SessionKitExpressAdapterOptions,

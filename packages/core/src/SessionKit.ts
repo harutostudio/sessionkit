@@ -24,6 +24,10 @@ function defaultRenewBeforeSeconds(opts: SessionKitOptions<any, any>): number {
 
 type InternalAuth<TPayload, TPrincipal> = AuthContext<TPayload, TPrincipal>;
 
+/**
+ * Framework-agnostic session runtime responsible for auth context hydration,
+ * session creation/revocation, and optional token refresh behavior.
+ */
 export class SessionKit<TPayload, TPrincipal> {
     private readonly cookieName: string;
     private readonly lockProvider: NoopLockProvider | NonNullable<SessionKitOptions<TPayload, TPrincipal>["lockProvider"]>;
@@ -33,6 +37,9 @@ export class SessionKit<TPayload, TPrincipal> {
         this.lockProvider = opts.lockProvider ?? new NoopLockProvider();
     }
 
+    /**
+     * Creates middleware that resolves session state and stores auth context.
+     */
     middleware(): HttpMiddleware {
         return async (ctx, next) => {
             try {
@@ -45,10 +52,16 @@ export class SessionKit<TPayload, TPrincipal> {
         };
     }
 
+    /**
+     * Alias of {@link middleware}. Useful for readability in route composition.
+     */
     optionalAuth(): HttpMiddleware {
         return this.middleware();
     }
 
+    /**
+     * Creates middleware that requires an authenticated session.
+     */
     requireAuth(options?: RequireAuthOptions): HttpMiddleware {
         return async (ctx, next) => {
             const auth = this.getAuth(ctx);
@@ -67,6 +80,9 @@ export class SessionKit<TPayload, TPrincipal> {
         };
     }
 
+    /**
+     * Creates a new session, sets cookie, and optionally hydrates request auth context.
+     */
     async signIn(
         ctx: HttpContext,
         payload: TPayload,
@@ -104,6 +120,9 @@ export class SessionKit<TPayload, TPrincipal> {
         return { sessionId, principal, expiresAt };
     }
 
+    /**
+     * Deletes session data and clears the session cookie.
+     */
     async signOut(ctx: HttpContext, options?: SignOutOptions): Promise<void> {
         const alwaysClear = options?.alwaysClearCookie ?? true;
         const sid = ctx.getCookie(this.cookieName);
@@ -128,6 +147,9 @@ export class SessionKit<TPayload, TPrincipal> {
         });
     }
 
+    /**
+     * Returns auth context attached to the request, or an unauthenticated default value.
+     */
     getAuth(ctx: HttpContext): AuthContext<TPayload, TPrincipal> {
         const found = ctx.getAuth<InternalAuth<TPayload, TPrincipal>>();
         if (found) return stripInternal(found);

@@ -4,6 +4,9 @@ import type {HttpContext, HttpMiddleware} from "./http/HttpContext";
 import type {ErrorCode, Logger} from "./errors";
 import type {LockProvider} from "./session/LockProvider";
 
+/**
+ * Authentication state attached to each request context.
+ */
 export type AuthContext<TPayload, TPrincipal> = {
     sessionId: string | null;
     session: StoredSession<TPayload> | null;
@@ -11,6 +14,9 @@ export type AuthContext<TPayload, TPrincipal> = {
     isAuthenticated: boolean;
 };
 
+/**
+ * Root configuration for creating a {@link SessionKit} instance.
+ */
 export type SessionKitOptions<TPayload, TPrincipal> = {
     store: SessionStore<TPayload>;
 
@@ -46,21 +52,33 @@ export type SessionKitOptions<TPayload, TPrincipal> = {
     logger?: Logger;
 };
 
+/**
+ * Options for {@link SessionKit.requireAuth}.
+ */
 export type RequireAuthOptions = {
     onFail?: (ctx: HttpContext) => Promise<void> | void;
 };
 
+/**
+ * Options for {@link SessionKit.signIn}.
+ */
 export type SignInOptions = {
     ttlSeconds?: number;
     hydrateContext?: boolean; // default true
 };
 
+/**
+ * Result returned by {@link SessionKit.signIn}.
+ */
 export type SignInResult<TPrincipal> = {
     sessionId: string;
     principal: TPrincipal;
     expiresAt: number;
 };
 
+/**
+ * Options for {@link SessionKit.signOut}.
+ */
 export type SignOutOptions = {
     alwaysClearCookie?: boolean; // default true
 };
