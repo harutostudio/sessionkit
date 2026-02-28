@@ -146,300 +146,603 @@ app.listen(3000);
 
 ## Public API (Complete)
 
-The list below documents all public exports from package entry points.
+This section documents all public exports from package entry points. Each subsection ends with a runnable-style example.
 
 ### `@sessionkit/core`
 
 #### Class: `SessionKit<TPayload, TPrincipal>`
 
-1. `constructor(opts: SessionKitOptions<TPayload, TPrincipal>)`
+### constructor(opts)
 
-- Creates a SessionKit runtime instance.
+Creates a SessionKit runtime with store, session policy, cookie policy, principal projection, and optional hooks.
 
-2. `middleware(): HttpMiddleware`
+```ts
+const kit = new SessionKit<Payload, Principal>({
+  // required: session persistence implementation
+  store,
+  // required: baseline session TTL policy
+  session: { ttlSeconds: 3600 },
+  // required: map payload into principal exposed to app code
+  principalFactory(payload) {
+    return { id: payload.userId };
+  },
+});
+```
 
-- Resolves cookie session state and writes auth context to `ctx.setAuth(...)`.
+### middleware()
 
-3. `optionalAuth(): HttpMiddleware`
+Creates middleware that resolves session state from cookie + store and hydrates auth context for the current request.
 
-- Semantic alias of `middleware()`.
+```ts
+// place early so downstream handlers can read auth context
+app.use(toExpressMiddleware(kit.middleware()));
+```
 
-4. `requireAuth(options?: RequireAuthOptions): HttpMiddleware`
+### optionalAuth()
 
-- Requires an authenticated session.
-- If not authenticated, behavior priority is:
-  - `options.onFail`
-  - `opts.hooks.onUnauthorized`
-  - otherwise throw `SessionKitError("UNAUTHORIZED", ...)`
+Creates middleware equivalent to `middleware()`. This is an intent-oriented alias when authentication is optional.
 
-5. `signIn(ctx, payload, options?): Promise<SignInResult<TPrincipal>>`
+```ts
+// same behavior as middleware(), clearer route intent naming
+app.use(toExpressMiddleware(kit.optionalAuth()));
+```
 
-- Creates a new session, persists it in the store, and sets the cookie.
-- Returns `{ sessionId, principal, expiresAt }`.
+### requireAuth([options])
 
-`SignInOptions` optional fields:
-- `ttlSeconds?: number`
-  - Overrides global `session.ttlSeconds` for this sign-in call.
-- `hydrateContext?: boolean` (default: `true`)
-  - Controls whether auth context is immediately written for the current request.
+Creates middleware that enforces authenticated access. If the request is unauthenticated, handling priority is `options.onFail`, then configured `hooks.onUnauthorized`, then throwing `SessionKitError("UNAUTHORIZED", ...)`.
 
-6. `signOut(ctx, options?): Promise<void>`
+`options` is optional and contains:
 
-- Deletes session data, clears the cookie, and sets current auth context to unauthenticated.
+- `onFail`: custom unauthenticated handler `(ctx) => void | Promise<void>`
 
-`SignOutOptions` optional fields:
-- `alwaysClearCookie?: boolean` (default: `true`)
-  - `true`: clear cookie even if store delete fails.
-  - `false`: throw on store delete failure (`STORE_UNAVAILABLE`).
+```ts
+app.get("/private", toExpressMiddleware(kit.requireAuth()), handler);
 
-7. `getAuth(ctx): AuthContext<TPayload, TPrincipal>`
+app.get(
+  "/private-custom",
+  toExpressMiddleware(
+    kit.requireAuth({
+      // option: override unauthenticated behavior for this route
+      onFail(ctx) {
+        ctx.status(401);
+        ctx.json({ error: "login required" });
+      },
+    }),
+  ),
+  handler,
+);
+```
 
-- Reads auth context from request context.
-- Returns a default unauthenticated object if no auth context is present.
+### signIn(ctx, payload, [options])
+
+Creates a new session, stores it, sets cookie, and returns `SignInResult<TPrincipal>`.
+
+`options` is optional and contains:
+
+- `ttlSeconds`: per-call TTL override (default is `session.ttlSeconds`)
+- `hydrateContext`: whether to set auth context immediately in current request (default is `true`)
+
+```ts
+const result = await kit.signIn(
+  ctx,
+  {
+    // payload: your stored session data
+    userId: "u_001",
+    role: "admin",
+  },
+  {
+    // option: override TTL for this sign-in only
+    ttlSeconds: 900,
+    // option: immediately mark current request as authenticated
+    hydrateContext: true,
+  },
+);
+
+console.log(result.sessionId, result.principal, result.expiresAt);
+```
+
+### signOut(ctx, [options])
+
+Deletes session from store, clears cookie, and resets auth context to unauthenticated.
+
+`options` is optional and contains:
+
+- `alwaysClearCookie`: if `true`, cookie is cleared even when store delete fails; if `false`, delete failure throws
+
+```ts
+await kit.signOut(ctx, {
+  // option: fail hard if store deletion fails
+  alwaysClearCookie: false,
+});
+```
+
+### getAuth(ctx)
+
+Reads auth context from request context and returns an unauthenticated default object when none is present.
+
+```ts
+const auth = kit.getAuth(ctx);
+
+// shape includes: sessionId, session, principal, isAuthenticated
+if (!auth.isAuthenticated) {
+  // handle guest flow
+}
+```
 
 #### Type: `SessionKitOptions<TPayload, TPrincipal>`
 
-Required fields:
-- `store: SessionStore<TPayload>`
-- `session: { ttlSeconds: number; ... }`
-- `principalFactory(payload): TPrincipal`
+Defines runtime configuration for `new SessionKit(...)`, including required store/session/principal settings and optional cookie, token-refresh, lock, hook, and logger settings.
 
-Optional fields:
-- `cookie?: CookieOptions`
-- `payloadTransformer?: (raw: unknown) => TPayload`
-- `token?: { shouldRefresh; refresh; onRefreshFail? }`
-- `lockProvider?: LockProvider`
-- `hooks?: { onUnauthorized?; onInvalidSession? }`
-- `logger?: Logger`
+`session` options are:
 
-`session` fields:
-- `ttlSeconds: number`
-- `rolling?: boolean` (default: `false`)
-- `touchEverySeconds?: number` (default: `60`)
-- `renewBeforeSeconds?: number` (default: use this field if set, else `touchEverySeconds`, else `60`)
+- `rolling`
+- `touchEverySeconds`
+- `renewBeforeSeconds`
 
-`token` fields:
-- `shouldRefresh(payload, nowMs): boolean`
-- `refresh(payload): Promise<{ payload; ttlSeconds?: number }>`
-- `onRefreshFail?: "unauth" | "revoke"` (default: `"unauth"`)
+`token` options are:
 
-`hooks` fields:
-- `onUnauthorized?(ctx)`
-- `onInvalidSession?(ctx, reason)`
+- `onRefreshFail`
+
+```ts
+const kit = new SessionKit<Payload, Principal>({
+  store,
+  cookie: {
+    // option: cookie name (default: "sid")
+    name: "sid",
+    // option: cookie path (default: "/")
+    path: "/",
+    // option: cookie domain
+    domain: "example.com",
+    // option: client-side JS access (default: true means HttpOnly enabled)
+    httpOnly: true,
+    // option: secure cookie for HTTPS
+    secure: true,
+    // option: lax | strict | none (default: "lax")
+    sameSite: "lax",
+    // option: explicit max-age override in seconds
+    maxAgeSeconds: 3600,
+  },
+  session: {
+    ttlSeconds: 3600,
+    // option: enable rolling renewal
+    rolling: true,
+    // option: fallback renewal threshold in seconds
+    touchEverySeconds: 60,
+    // option: preferred renewal threshold in seconds
+    renewBeforeSeconds: 30,
+  },
+  principalFactory(payload) {
+    return { id: payload.userId, role: payload.role };
+  },
+  payloadTransformer(raw) {
+    // option: migrate/validate legacy payload shape
+    return raw as Payload;
+  },
+  token: {
+    shouldRefresh(payload, nowMs) {
+      return payload.accessTokenExpMs - nowMs < 60_000;
+    },
+    async refresh(payload) {
+      const refreshed = await refreshToken(payload.refreshToken);
+      return {
+        payload: {
+          ...payload,
+          accessToken: refreshed.accessToken,
+          accessTokenExpMs: refreshed.expMs,
+        },
+        // option: override TTL after refresh
+        ttlSeconds: 3600,
+      };
+    },
+    // option: unauth | revoke
+    onRefreshFail: "revoke",
+  },
+  lockProvider,
+  hooks: {
+    onUnauthorized(ctx) {
+      ctx.status(401);
+      ctx.json({ error: "unauthorized" });
+    },
+    onInvalidSession(ctx, reason) {
+      console.warn("invalid session", reason);
+    },
+  },
+  logger: console,
+});
+```
 
 #### Type: `CookieOptions`
 
-All fields are optional:
-- `name?: string` (default: `"sid"`)
-- `path?: string` (default: `"/"`)
-- `domain?: string`
-- `httpOnly?: boolean` (default: `true`)
-- `secure?: boolean`
-- `sameSite?: "lax" | "strict" | "none"` (default: `"lax"`)
-- `maxAgeSeconds?: number`
+Defines cookie-level behavior used by core and adapters.
+
+```ts
+const cookieOptions = {
+  // option: default is "sid"
+  name: "sid",
+  // option: default is "/"
+  path: "/",
+  // option: cookie scope domain
+  domain: "example.com",
+  // option: default is true
+  httpOnly: true,
+  // option: set true for HTTPS deployment
+  secure: true,
+  // option: default is "lax"
+  sameSite: "strict",
+  // option: max-age in seconds
+  maxAgeSeconds: 1800,
+};
+```
 
 #### Interface: `HttpContext`
 
-- `getCookie(name): string | null`
-- `setCookie(name, value, options): void`
-- `clearCookie(name, options): void`
-- `setAuth<T>(value): void`
-- `getAuth<T>(): T | null`
-- `status(code): void`
-- `json(body): void`
+Defines the framework-neutral contract SessionKit uses to read cookies, write cookies, store auth context, and emit response status/body.
+
+```ts
+const ctx: HttpContext = {
+  getCookie(name) {
+    return null;
+  },
+  setCookie(name, value, options) {
+    // options includes cookie flags and optional maxAgeSeconds
+  },
+  clearCookie(name, options) {
+    // clears cookie using provided cookie scope
+  },
+  setAuth(value) {
+    // attach auth context for current request
+  },
+  getAuth() {
+    return null;
+  },
+  status(code) {
+    // set response status
+  },
+  json(body) {
+    // write JSON response
+  },
+};
+```
 
 #### Type: `HttpMiddleware`
 
-- `(ctx: HttpContext, next: () => Promise<void>) => Promise<void>`
+Defines middleware signature accepted by adapters.
+
+```ts
+const middleware: HttpMiddleware = async (ctx, next) => {
+  // perform work before downstream
+  await next();
+  // perform work after downstream
+};
+```
 
 #### Store API
 
-`StoredSession<TPayload>`
-- `payload: TPayload`
-- `createdAt: number`
-- `expiresAt: number`
+Defines storage contracts and the bundled in-memory implementation.
 
-`SessionStore<TPayload>`
-- `get(sessionId): Promise<StoredSession<TPayload> | null>`
-- `set(sessionId, value, ttlSeconds): Promise<void>`
-- `del(sessionId): Promise<void>`
-- `touch?(sessionId, ttlSeconds): Promise<void>` (optional)
-- `close?(): Promise<void>` (optional)
+`SessionStore<TPayload>` optional options are:
 
-`MapSessionStore<TPayload>`
-- `constructor(options?)`
-  - `cleanupIntervalSeconds?: number` (default: `60`)
-  - `maxSize?: number`
-- Implements all `SessionStore` methods.
+- `touch`
+- `close`
+
+`MapSessionStore` constructor options are:
+
+- `cleanupIntervalSeconds`
+- `maxSize`
+
+```ts
+const memoryStore = new MapSessionStore<Payload>({
+  // option: cleanup interval in seconds
+  cleanupIntervalSeconds: 60,
+  // option: max entries before naive eviction
+  maxSize: 10_000,
+});
+
+await memoryStore.set("sid-1", { payload: { userId: "u1" }, createdAt: Date.now(), expiresAt: Date.now() + 3600_000 }, 3600);
+const session = await memoryStore.get("sid-1");
+await memoryStore.touch?.("sid-1", 3600);
+await memoryStore.del("sid-1");
+await memoryStore.close?.();
+```
 
 #### Lock API
 
-`LockProvider`
-- `withLock<T>(key, ttlSeconds, fn): Promise<T>`
+Defines distributed lock contract and the bundled no-op implementation.
 
-`NoopLockProvider`
-- Executes `fn` immediately without a distributed lock.
+```ts
+const lock = new NoopLockProvider();
+
+const result = await lock.withLock("sessionkit:refresh:sid-1", 10, async () => {
+  // critical section
+  return "ok";
+});
+```
 
 #### Error API
 
-`ErrorCode`
-- `"UNAUTHORIZED"`
-- `"INVALID_SESSION"`
-- `"SESSION_EXPIRED"`
-- `"TOKEN_REFRESH_FAILED"`
-- `"LOCK_TIMEOUT"`
-- `"STORE_UNAVAILABLE"`
-- `"INTERNAL_ERROR"`
+Defines error code model, canonical error type, and helper utilities used by adapters.
 
-`SessionKitError`
-- `new SessionKitError(code, message, cause?, details?)`
+```ts
+try {
+  throw new SessionKitError("UNAUTHORIZED", "Authentication required.");
+} catch (error) {
+  if (isSessionKitError(error)) {
+    const status = statusFromErrorCode(error.code);
+    const body = defaultErrorBody(error.code, error.message);
+    console.log(status, body);
+  }
+}
+```
 
-`ErrorBody`
-- `{ error: { code, message } }`
+#### Cookie helper functions
 
-`Logger`
-- `debug/info/warn/error(msg, meta?)`
+Provides parser/serializer helpers used by adapters and custom integrations.
 
-Helpers:
-- `defaultErrorBody(code, message): ErrorBody`
-- `isSessionKitError(error): error is SessionKitError`
-- `toSessionKitError(error): SessionKitError`
-- `statusFromErrorCode(code): number`
-
-Cookie helpers:
-- `parseCookieHeader(cookieHeader): Record<string, string>`
-- `serializeSetCookie(name, value, options): string`
-- `serializeClearCookie(name, options): string`
-
----
+```ts
+const parsed = parseCookieHeader("sid=abc123; theme=dark");
+const setHeader = serializeSetCookie("sid", "abc123", {
+  // option: cookie path
+  path: "/",
+  // option: secure + httponly flags
+  secure: true,
+  httpOnly: true,
+  // option: same-site policy
+  sameSite: "lax",
+  // option: explicit max-age
+  maxAgeSeconds: 3600,
+});
+const clearHeader = serializeClearCookie("sid", { path: "/" });
+```
 
 ### `@sessionkit/express`
 
-#### Types
+#### Type: `SessionKitExpressRequest`
 
-`SessionKitExpressRequest`
-- `headers: Record<string, string | string[] | undefined>`
-- `auth?: unknown`
+Defines minimal request shape required by the Express adapter.
 
-`SessionKitExpressResponse`
-- `status(code): unknown`
-- `json(body): unknown`
-- `getHeader(name): unknown`
-- `setHeader(name, value): unknown`
+```ts
+const req: SessionKitExpressRequest = {
+  headers: {
+    cookie: "sid=abc123",
+  },
+  auth: undefined,
+};
+```
 
-`SessionKitExpressAdapterOptions`
-- `onError?: (error: SessionKitError, req, res) => Promise<void> | void`
+#### Type: `SessionKitExpressResponse`
 
-#### Functions
+Defines minimal response shape required by the Express adapter.
 
-1. `createExpressHttpContext(req, res): HttpContext`
+```ts
+const res: SessionKitExpressResponse = {
+  status(code) {
+    return code;
+  },
+  json(body) {
+    return body;
+  },
+  getHeader(name) {
+    return undefined;
+  },
+  setHeader(name, value) {
+    return value;
+  },
+};
+```
 
-- Converts Express request/response into core `HttpContext`.
+#### Function: `createExpressHttpContext(req, res)`
 
-2. `toExpressMiddleware(middleware, options?): SessionKitExpressHandler`
+Converts Express request/response objects into core `HttpContext`.
 
-- Converts a core middleware to an Express-compatible middleware.
-- On `SessionKitError`:
-  - uses `options.onError` first if provided
-  - otherwise maps with `statusFromErrorCode` + `defaultErrorBody`
+```ts
+const ctx = createExpressHttpContext(req, res);
+await kit.signIn(ctx, { userId: "u_001", role: "user" });
+```
 
----
+#### Function: `toExpressMiddleware(middleware, [options])`
+
+Converts core middleware to Express middleware and maps `SessionKitError` to HTTP responses.
+
+`options` is optional and contains:
+
+- `onError`: custom SessionKitError handler
+
+```ts
+app.use(
+  toExpressMiddleware(kit.middleware(), {
+    // option: customize adapter-level error output
+    onError(error, req, res) {
+      res.status(500);
+      res.json({ code: error.code, message: error.message });
+    },
+  }),
+);
+```
 
 ### `@sessionkit/hono`
 
-#### Constant
+#### Constant: `SESSIONKIT_HONO_AUTH_KEY`
 
-- `SESSIONKIT_HONO_AUTH_KEY = "auth"`
+Defines the context key used by the Hono adapter to store auth context.
 
-#### Type
+```ts
+console.log(SESSIONKIT_HONO_AUTH_KEY); // "auth"
+```
 
-`SessionKitHonoAdapterOptions`
-- `onError?: (error: SessionKitError, c: Context) => Promise<Response | void> | Response | void`
+#### Type: `SessionKitHonoAdapterOptions`
 
-#### Functions
+Defines adapter-level error customization for Hono integration.
 
-1. `createHonoHttpContext(c): HttpContext`
+`options` is optional and contains:
 
-- Converts Hono `Context` into core `HttpContext`.
+- `onError`: custom SessionKitError handler returning `Response | void`
 
-2. `toHonoMiddleware(middleware, options?): MiddlewareHandler`
+```ts
+app.use(
+  "*",
+  toHonoMiddleware(kit.middleware(), {
+    // option: customize error mapping
+    onError(error, c) {
+      return c.json({ code: error.code, message: error.message }, 500);
+    },
+  }),
+);
+```
 
-- Converts a core middleware to Hono middleware.
-- `SessionKitError` handling follows the same strategy as the Express adapter.
+#### Function: `createHonoHttpContext(c)`
 
----
+Converts Hono `Context` into core `HttpContext`.
+
+```ts
+const ctx = createHonoHttpContext(c);
+const auth = kit.getAuth(ctx);
+```
+
+#### Function: `toHonoMiddleware(middleware, [options])`
+
+Converts core middleware to Hono middleware and handles SessionKit error mapping.
+
+`options` is optional and contains:
+
+- `onError`: custom SessionKitError handler returning `Response | void`
+
+```ts
+app.use("/private/*", toHonoMiddleware(kit.requireAuth()));
+```
 
 ### `@sessionkit/redis`
 
-#### Types
+#### Type: `SessionCodec<TPayload>`
 
-`SessionCodec<TPayload>`
-- `serialize(value): string`
-- `deserialize(raw): StoredSession<TPayload>`
+Defines custom serialization/deserialization strategy for persisted sessions.
 
-`RedisSessionStoreOptions<TPayload>` (optional)
-- `keyPrefix?: string` (default: `"sessionkit:sess:"`)
-- `codec?: SessionCodec<TPayload>` (default: JSON codec)
+```ts
+const codec: SessionCodec<Payload> = {
+  serialize(value) {
+    return JSON.stringify(value);
+  },
+  deserialize(raw) {
+    return JSON.parse(raw) as StoredSession<Payload>;
+  },
+};
+```
 
-`RedisLockProviderOptions` (optional)
-- `keyPrefix?: string` (default: `"sessionkit:lock:"`)
-- `acquireTimeoutMs?: number` (default: `5000`)
-- `retryDelayMs?: number` (default: `50`)
+#### Type: `RedisSessionStoreOptions<TPayload>`
 
-`RedisClientLike`
-- `get(key)`
-- `set(...args)`
-- `del(key)`
-- `expire?(key, ttlSeconds)`
-- `setEx?(key, ttlSeconds, value)`
-- `setex?(key, ttlSeconds, value)`
-- `eval?(...args)`
-- `connect?()`
-- `quit?()`
-- `disconnect?()`
-- `isOpen?: boolean`
-- `status?: string`
+Defines optional Redis store behavior.
 
-`RedisConnectionParams` (all optional)
-- `url?: string`
-- `host?: string`
-- `port?: number`
-- `username?: string`
-- `password?: string`
-- `database?: number`
-- `tls?: boolean`
-- `lazyConnect?: boolean`
-- `redisOptions?: Record<string, unknown>`
+`options` is optional and contains:
 
-`RedisConnectionInput`
-- `RedisClientLike`
-- `{ client: RedisClientLike; manageClient?: boolean; lazyConnect?: boolean }`
-- `RedisConnectionParams`
+- `keyPrefix`
+- `codec`
 
-`RedisLockProviderInput`
-- `RedisConnectionInput`
-- `{ store: RedisSessionStore<unknown> }`
+```ts
+const store = new RedisSessionStore<Payload>(
+  { url: "redis://localhost:6379" },
+  {
+    // option: namespacing key prefix
+    keyPrefix: "sessionkit:sess:",
+    // option: custom codec
+    codec,
+  },
+);
+```
 
-#### Classes
+#### Type: `RedisLockProviderOptions`
 
-1. `RedisSessionStore<TPayload>`
+Defines optional lock acquisition behavior.
 
-- `constructor(connection: RedisConnectionInput, options?: RedisSessionStoreOptions<TPayload>)`
-- Methods:
-  - `get(sessionId)`
-  - `set(sessionId, value, ttlSeconds)`
-  - `del(sessionId)`
-  - `touch(sessionId, ttlSeconds)`
-  - `close()`
-  - `getClientManager()` (exposed for lock provider reuse)
+`options` is optional and contains:
 
-2. `RedisLockProvider`
+- `keyPrefix`
+- `acquireTimeoutMs`
+- `retryDelayMs`
 
-- `constructor(input: RedisLockProviderInput, options?: RedisLockProviderOptions)`
-- Methods:
-  - `withLock<T>(key, ttlSeconds, fn): Promise<T>`
-  - `close(): Promise<void>`
+```ts
+const lockProvider = new RedisLockProvider(
+  { url: "redis://localhost:6379" },
+  {
+    // option: lock key namespace
+    keyPrefix: "sessionkit:lock:",
+    // option: max wait to acquire lock
+    acquireTimeoutMs: 5000,
+    // option: polling delay while waiting lock
+    retryDelayMs: 50,
+  },
+);
+```
 
+#### Type: `RedisConnectionParams`
+
+Defines parameterized Redis connection input.
+
+`options` is optional and contains:
+
+- `url`
+- `host`
+- `port`
+- `username`
+- `password`
+- `database`
+- `tls`
+- `lazyConnect`
+- `redisOptions`
+
+```ts
+const connection: RedisConnectionParams = {
+  // option: full URL
+  url: "redis://localhost:6379",
+  // option: enable lazy connect
+  lazyConnect: false,
+};
+```
+
+#### Type: `RedisConnectionInput`
+
+Represents accepted constructor input for Redis store and lock provider.
+
+```ts
+const byClient: RedisConnectionInput = redisClient;
+const byWrapper: RedisConnectionInput = { client: redisClient, manageClient: false, lazyConnect: true };
+const byParams: RedisConnectionInput = { url: "redis://localhost:6379" };
+```
+
+#### Type: `RedisLockProviderInput`
+
+Represents accepted constructor input for `RedisLockProvider`.
+
+```ts
+const lockInputByParams: RedisLockProviderInput = { url: "redis://localhost:6379" };
+const lockInputByStore: RedisLockProviderInput = { store };
+```
+
+#### Class: `RedisSessionStore<TPayload>`
+
+Redis-backed session store implementation for SessionKit.
+
+```ts
+const store = new RedisSessionStore<Payload>({ url: "redis://localhost:6379" });
+
+await store.set("sid-1", { payload: { userId: "u1" }, createdAt: Date.now(), expiresAt: Date.now() + 3600_000 }, 3600);
+const session = await store.get("sid-1");
+await store.touch("sid-1", 3600);
+await store.del("sid-1");
+await store.close();
+```
+
+#### Class: `RedisLockProvider`
+
+Redis-backed distributed lock provider, commonly used for token refresh race control.
+
+```ts
+const lock = new RedisLockProvider({ url: "redis://localhost:6379" });
+
+await lock.withLock("sessionkit:refresh:sid-1", 10, async () => {
+  // critical section work
+});
+
+await lock.close();
+```
 ## Configuring an agenda
 
 Recommended rollout sequence:
