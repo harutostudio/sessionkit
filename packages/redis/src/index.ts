@@ -1,8 +1,14 @@
-export {};
+export {
+  RedisSessionStore,
+  type RedisClientLike,
+  type RedisConnectionInput,
+  type RedisConnectionParams,
+  type RedisSessionStoreOptions,
+  type SessionCodec,
+} from "./RedisSessionStore";
 
-
-class Redis {
-    constructor(private readonly redis: Redis) {
-
-    }
-}
+export {
+  RedisLockProvider,
+  type RedisLockProviderInput,
+  type RedisLockProviderOptions,
+} from "./RedisLockProvider";
