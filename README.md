@@ -16,6 +16,7 @@ pnpm install
 pnpm build
 pnpm typecheck
 pnpm test
+pnpm docs:api
 ```
 
 ## Release

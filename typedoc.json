@@ -1,0 +1,21 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "packages/core/src/index.ts",
+    "packages/redis/src/index.ts",
+    "packages/express/src/index.ts",
+    "packages/hono/src/index.ts"
+  ],
+  "entryPointStrategy": "resolve",
+  "out": "docs/reference",
+  "tsconfig": "tsconfig.json",
+  "excludePrivate": false,
+  "excludeProtected": false,
+  "excludeInternal": true,
+  "readme": "README.md",
+  "name": "SessionKit - v0.1.0-PRE",
+  "sort": ["kind", "source-order"],
+  "categorizeByGroup": true,
+  "plugin": [],
+  "groupOrder": ["Classes", "Interfaces", "Type Aliases", "Functions", "Variables"]
+}

@@ -7,3 +7,4 @@
 /packages/express/dist
 /packages/hono/node_modules
 /packages/redis/node_modules
+/docs
