@@ -106,6 +106,23 @@ describe("SessionKit", () => {
     await store.close?.();
   });
 
+  it("optionalAuth_loads_session_and_injects_principal_without_blocking", async () => {
+    const jar = new Map<string, string>();
+    const store = new MapSessionStore<{ userId: string; refreshToken?: string }>();
+    const kit = createKit(store);
+
+    await kit.signIn(new FakeHttpContext(jar), { userId: "u2-opt", refreshToken: "rt2-opt" });
+
+    const requestCtx = new FakeHttpContext(jar);
+    await kit.optionalAuth()(requestCtx, async () => Promise.resolve());
+
+    const auth = kit.getAuth(requestCtx);
+    expect(auth.isAuthenticated).toBe(true);
+    expect(auth.principal?.userId).toBe("u2-opt");
+
+    await store.close?.();
+  });
+
   it("signOut_clears_cookie_and_deletes_store", async () => {
     const jar = new Map<string, string>();
     const store = new MapSessionStore<{ userId: string; refreshToken?: string }>();
@@ -124,6 +141,30 @@ describe("SessionKit", () => {
     expect(kit.getAuth(signOutCtx).isAuthenticated).toBe(false);
 
     await store.close?.();
+  });
+
+  it("signOut_does_not_clear_cookie_when_alwaysClearCookie_is_false_and_store_delete_fails", async () => {
+    type Payload = { userId: string; refreshToken?: string };
+
+    class FailingDelStore extends MapSessionStore<Payload> {
+      override async del(_sessionId: string): Promise<void> {
+        throw new Error("delete failed");
+      }
+    }
+
+    const jar = new Map<string, string>();
+    const store = new FailingDelStore();
+    const kit = createKit(store);
+
+    await kit.signIn(new FakeHttpContext(jar), { userId: "u3x", refreshToken: "rt3x" });
+
+    const signOutCtx = new FakeHttpContext(jar);
+    await expect(kit.signOut(signOutCtx, { alwaysClearCookie: false })).rejects.toMatchObject({
+      code: "STORE_UNAVAILABLE",
+    });
+
+    expect(jar.has("sid")).toBe(true);
+    expect(signOutCtx.clearedCookies).toHaveLength(0);
   });
 
   it("requireAuth_throws_UNAUTHORIZED_when_missing", async () => {
@@ -211,6 +252,46 @@ describe("SessionKit", () => {
 
     await runCase("unauth");
     await runCase("revoke");
+  });
+
+  it("refresh_store_failure_throws_STORE_UNAVAILABLE", async () => {
+    type Payload = { userId: string; refreshToken?: string };
+
+    let getCalls = 0;
+    const store: SessionStore<Payload> = {
+      async get(): Promise<StoredSession<Payload> | null> {
+        getCalls += 1;
+        if (getCalls === 1) {
+          return {
+            payload: { userId: "u-store-fail", refreshToken: "rt-old" },
+            createdAt: Date.now() - 1000,
+            expiresAt: Date.now() + 120000,
+          };
+        }
+        throw new Error("redis down");
+      },
+      async set(): Promise<void> {
+        return;
+      },
+      async del(): Promise<void> {
+        return;
+      },
+    };
+
+    const kit = new SessionKit<Payload, { userId: string }>({
+      store,
+      session: { ttlSeconds: 120, rolling: true, renewBeforeSeconds: 10 },
+      principalFactory: (payload) => ({ userId: payload.userId }),
+      token: {
+        shouldRefresh: () => true,
+        refresh: async (payload) => ({ payload }),
+      },
+    });
+
+    const jar = new Map<string, string>([["sid", "sid-store-fail"]]);
+    await expect(kit.middleware()(new FakeHttpContext(jar), async () => Promise.resolve())).rejects.toMatchObject({
+      code: "STORE_UNAVAILABLE",
+    });
   });
 
   it("rolling_renewBeforeSeconds_only_touches_when_near_expiry", async () => {
