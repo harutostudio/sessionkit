@@ -1,4 +1,4 @@
-import type { LockProvider } from "@sessionkit/core";
+import { SessionKitError, type LockProvider } from "@sessionkit/core";
 import {
   RedisClientManager,
   type RedisConnectionInput,
@@ -29,9 +29,16 @@ export class RedisLockProvider implements LockProvider {
   private readonly acquireTimeoutMs: number;
   private readonly retryDelayMs: number;
   private readonly clientManager: RedisClientManager;
+  private readonly ownsClientManager: boolean;
 
   constructor(input: RedisLockProviderInput, options?: RedisLockProviderOptions) {
-    this.clientManager = isStoreInput(input) ? input.store.getClientManager() : new RedisClientManager(input);
+    if (isStoreInput(input)) {
+      this.clientManager = input.store.getClientManager();
+      this.ownsClientManager = false;
+    } else {
+      this.clientManager = new RedisClientManager(input);
+      this.ownsClientManager = true;
+    }
     this.keyPrefix = options?.keyPrefix ?? DEFAULT_KEY_PREFIX;
     this.acquireTimeoutMs = options?.acquireTimeoutMs ?? DEFAULT_ACQUIRE_TIMEOUT_MS;
     this.retryDelayMs = options?.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
@@ -41,21 +48,49 @@ export class RedisLockProvider implements LockProvider {
     const ttl = normalizeTtl(ttlSeconds);
     const lockKey = `${this.keyPrefix}${key}`;
     const token = createLockToken();
-    const client = await this.clientManager.getClient();
-
-    const acquired = await this.acquireLock(client, lockKey, token, ttl);
-    if (!acquired) {
-      throw new Error(`Failed to acquire lock: ${lockKey}`);
+    let client: Awaited<ReturnType<RedisClientManager["getClient"]>>;
+    try {
+      client = await this.clientManager.getClient();
+    } catch (error) {
+      throw toRedisLockError(error, lockKey, "connect");
     }
 
+    let acquired: boolean;
+    try {
+      acquired = await this.acquireLock(client, lockKey, token, ttl);
+    } catch (error) {
+      throw toRedisLockError(error, lockKey, "acquire");
+    }
+
+    if (!acquired) {
+      throw new SessionKitError("LOCK_TIMEOUT", "Failed to acquire lock within timeout.", undefined, {
+        lockKey,
+        ttlSeconds: ttl,
+        acquireTimeoutMs: this.acquireTimeoutMs,
+      });
+    }
+
+    let fnError: unknown = null;
     try {
       return await fn();
+    } catch (error) {
+      fnError = error;
+      throw error;
     } finally {
-      await releaseLockIfOwned(client, lockKey, token);
+      try {
+        await releaseLockIfOwned(client, lockKey, token);
+      } catch (error) {
+        if (!fnError) {
+          throw toRedisLockError(error, lockKey, "release");
+        }
+      }
     }
   }
 
   async close(): Promise<void> {
+    if (!this.ownsClientManager) {
+      return;
+    }
     await this.clientManager.close();
   }
 
@@ -93,4 +128,64 @@ function createLockToken(): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function toRedisLockError(
+  error: unknown,
+  lockKey: string,
+  phase: "connect" | "acquire" | "release",
+): SessionKitError {
+  const code = classifyRedisError(error);
+  return new SessionKitError(
+    code,
+    code === "STORE_UNAVAILABLE" ? "Session store is unavailable." : "Redis lock operation failed.",
+    error,
+    {
+      lockKey,
+      phase,
+      redisCode: getErrorCode(error),
+    },
+  );
+}
+
+function classifyRedisError(error: unknown): "STORE_UNAVAILABLE" | "INTERNAL_ERROR" {
+  const msg = String((error as { message?: unknown })?.message ?? error ?? "").toLowerCase();
+  const code = getErrorCode(error);
+
+  const storeCodes = new Set([
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "ENOTFOUND",
+    "EAI_AGAIN",
+    "NR_CLOSED",
+  ]);
+
+  if (storeCodes.has(code)) {
+    return "STORE_UNAVAILABLE";
+  }
+
+  const storeKeywords = [
+    "connect",
+    "connection",
+    "socket",
+    "closed",
+    "timeout",
+    "read only",
+    "loading",
+    "clusterdown",
+    "try again",
+    "no connection",
+    "the client is closed",
+  ];
+
+  if (storeKeywords.some((k) => msg.includes(k))) {
+    return "STORE_UNAVAILABLE";
+  }
+
+  return "INTERNAL_ERROR";
+}
+
+function getErrorCode(error: unknown): string {
+  return String((error as { code?: unknown })?.code ?? "").toUpperCase();
 }
