@@ -1,7 +1,13 @@
 {
   "extends": "../../tooling/tsconfig/base.json",
   "compilerOptions": {
-    "outDir": "dist"
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@sessionkit/core": [
+        "../core/src/index.ts"
+      ]
+    }
   },
   "include": [
     "src/**/*.ts",
