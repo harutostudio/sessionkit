@@ -14,9 +14,9 @@
   "excludeProtected": false,
   "excludeInternal": true,
   "readme": "README.md",
-  "name": "SessionKit - v0.1.0-PRE",
+  "name": "SessionKit",
+  "includeVersion": true,
   "sort": ["kind", "source-order"],
   "categorizeByGroup": true,
-  "plugin": [],
   "groupOrder": ["Classes", "Interfaces", "Type Aliases", "Functions", "Variables"]
 }
