@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { SessionKitError, type HttpMiddleware } from "@sessionkit/core";
-import { createExpressHttpContext, toExpressMiddleware } from "../src";
+import { MapSessionStore, SessionKit, SessionKitError, type HttpMiddleware } from "@sessionkit/core";
+import { createExpressHttpContext, createExpressSessionKit, toExpressMiddleware } from "../src";
 
 type Req = {
   headers: Record<string, string | string[] | undefined>;
@@ -97,5 +97,21 @@ describe("ExpressAdapter", () => {
     expect(values).toHaveLength(2);
     expect(values[0]).toContain("sid=token-1");
     expect(values[1]).toContain("Max-Age=0");
+  });
+
+  it("supports adapter-bound middleware without toExpressMiddleware", async () => {
+    const core = new SessionKit<{ userId: string }, { userId: string }>({
+      store: new MapSessionStore<{ userId: string }>(),
+      session: { ttlSeconds: 60 },
+      principalFactory: (payload) => ({ userId: payload.userId }),
+    });
+    const kit = createExpressSessionKit(core);
+    const middleware = kit.middleware();
+    const { req, res } = createReqRes();
+    const next = vi.fn();
+
+    await middleware(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
   });
 });

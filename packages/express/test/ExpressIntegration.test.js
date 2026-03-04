@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "node:http";
 import { MapSessionStore, SessionKit } from "@sessionkit/core";
-import { createExpressHttpContext, toExpressMiddleware } from '../src/index.ts';
+import { createExpressSessionKit } from '../src/index.ts';
 
 let server;
 
@@ -15,11 +15,12 @@ afterEach(async () => {
 
 function createApp() {
   const store = new MapSessionStore();
-  const kit = new SessionKit({
+  const coreKit = new SessionKit({
     store,
     session: { ttlSeconds: 120, rolling: true, renewBeforeSeconds: 10 },
     principalFactory: (payload) => ({ userId: payload.userId }),
   });
+  const kit = createExpressSessionKit(coreKit);
 
   return { store, kit };
 }
@@ -29,28 +30,25 @@ async function startExpress(kit) {
   const app = express();
   app.use(express.json());
 
-  app.use(toExpressMiddleware(kit.middleware()));
+  app.use(kit.middleware());
 
   app.post("/login", async (req, res, next) => {
     try {
-      const ctx = createExpressHttpContext(req, res);
-      const result = await kit.signIn(ctx, { userId: req.body?.userId ?? "u1" });
+      const result = await kit.signIn(req, res, { userId: req.body?.userId ?? "u1" });
       res.status(200).json({ ok: true, me: result.principal });
     } catch (error) {
       next(error);
     }
   });
 
-  app.get("/me", toExpressMiddleware(kit.requireAuth()), (req, res) => {
-    const ctx = createExpressHttpContext(req, res);
-    const auth = kit.getAuth(ctx);
+  app.get("/me", kit.requireAuth(), (req, res) => {
+    const auth = kit.getAuth(req, res);
     res.status(200).json({ me: auth.principal });
   });
 
   app.post("/logout", async (req, res, next) => {
     try {
-      const ctx = createExpressHttpContext(req, res);
-      await kit.signOut(ctx);
+      await kit.signOut(req, res);
       res.status(200).json({ ok: true });
     } catch (error) {
       next(error);
@@ -58,7 +56,7 @@ async function startExpress(kit) {
   });
 
   app.get("/cookie-twice", (_req, res) => {
-    const ctx = createExpressHttpContext(_req, res);
+    const ctx = kit.context(_req, res);
     ctx.setCookie("sid", "abc", { path: "/", httpOnly: true });
     ctx.clearCookie("sid", { path: "/", httpOnly: true });
     res.status(200).json({ ok: true });

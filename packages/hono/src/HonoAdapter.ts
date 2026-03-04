@@ -1,7 +1,13 @@
 import {
+  type AuthContext,
   defaultErrorBody,
   isSessionKitError,
+  type RequireAuthOptions,
   SessionKitError,
+  SessionKit,
+  type SignInOptions,
+  type SignInResult,
+  type SignOutOptions,
   statusFromErrorCode,
   type HttpContext,
   type HttpMiddleware,
@@ -19,6 +25,20 @@ export const SESSIONKIT_HONO_AUTH_KEY = "auth";
  */
 export type SessionKitHonoAdapterOptions = {
   onError?: (error: SessionKitError, c: Context) => Promise<Response | void> | Response | void;
+};
+
+/**
+ * Adapter-bound SessionKit facade for Hono applications.
+ */
+export type HonoSessionKit<TPayload, TPrincipal> = {
+  readonly core: SessionKit<TPayload, TPrincipal>;
+  context(c: Context): HttpContext;
+  middleware(options?: SessionKitHonoAdapterOptions): MiddlewareHandler;
+  optionalAuth(options?: SessionKitHonoAdapterOptions): MiddlewareHandler;
+  requireAuth(requireAuthOptions?: RequireAuthOptions, options?: SessionKitHonoAdapterOptions): MiddlewareHandler;
+  signIn(c: Context, payload: TPayload, options?: SignInOptions): Promise<SignInResult<TPrincipal>>;
+  signOut(c: Context, options?: SignOutOptions): Promise<void>;
+  getAuth(c: Context): AuthContext<TPayload, TPrincipal>;
 };
 
 type HonoHttpContext = HttpContext & {
@@ -152,6 +172,42 @@ export function toHonoMiddleware(
       }
       return (c.body as (data: null, status?: number) => Response)(null, c.res.status || 200);
     }
+  };
+}
+
+/**
+ * Binds a core SessionKit instance to Hono adapter utilities.
+ */
+export function createHonoSessionKit<TPayload, TPrincipal>(
+  core: SessionKit<TPayload, TPrincipal>,
+  options?: SessionKitHonoAdapterOptions,
+): HonoSessionKit<TPayload, TPrincipal> {
+  const resolveAdapterOptions = (override?: SessionKitHonoAdapterOptions): SessionKitHonoAdapterOptions | undefined =>
+    override ?? options;
+
+  return {
+    core,
+    context(c) {
+      return createHonoHttpContext(c);
+    },
+    middleware(overrideOptions) {
+      return toHonoMiddleware(core.middleware(), resolveAdapterOptions(overrideOptions));
+    },
+    optionalAuth(overrideOptions) {
+      return toHonoMiddleware(core.optionalAuth(), resolveAdapterOptions(overrideOptions));
+    },
+    requireAuth(requireAuthOptions, overrideOptions) {
+      return toHonoMiddleware(core.requireAuth(requireAuthOptions), resolveAdapterOptions(overrideOptions));
+    },
+    signIn(c, payload, signInOptions) {
+      return core.signIn(createHonoHttpContext(c), payload, signInOptions);
+    },
+    signOut(c, signOutOptions) {
+      return core.signOut(createHonoHttpContext(c), signOutOptions);
+    },
+    getAuth(c) {
+      return core.getAuth(createHonoHttpContext(c));
+    },
   };
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
-import { SessionKitError, type HttpMiddleware } from "@sessionkit/core";
-import { toHonoMiddleware } from "../src";
+import { MapSessionStore, SessionKit, SessionKitError, type HttpMiddleware } from "@sessionkit/core";
+import { createHonoSessionKit, toHonoMiddleware } from "../src";
 
 const unauthorizedMiddleware: HttpMiddleware = async () => {
   throw new SessionKitError("UNAUTHORIZED", "Authentication required.");
@@ -60,5 +60,22 @@ describe("HonoAdapter", () => {
 
     expect(setCookie).toContain("sid=token-1");
     expect(setCookie).toContain("Max-Age=0");
+  });
+
+  it("supports adapter-bound middleware without toHonoMiddleware", async () => {
+    const core = new SessionKit<{ userId: string }, { userId: string }>({
+      store: new MapSessionStore<{ userId: string }>(),
+      session: { ttlSeconds: 60 },
+      principalFactory: (payload) => ({ userId: payload.userId }),
+    });
+    const kit = createHonoSessionKit(core);
+    const app = new Hono();
+
+    app.use("/me", kit.middleware());
+    app.get("/me", (c) => c.json({ ok: true }));
+
+    const res = await app.request("http://localhost/me");
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true });
   });
 });

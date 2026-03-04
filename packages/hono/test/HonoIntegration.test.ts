@@ -1,39 +1,37 @@
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { MapSessionStore, SessionKit } from "@sessionkit/core";
-import { createHonoHttpContext, toHonoMiddleware } from "../src";
+import { createHonoSessionKit } from "../src";
 
 function createApp() {
   const store = new MapSessionStore<{ userId: string }>();
-  const kit = new SessionKit<{ userId: string }, { userId: string }>({
+  const coreKit = new SessionKit<{ userId: string }, { userId: string }>({
     store,
     session: { ttlSeconds: 120, rolling: true, renewBeforeSeconds: 10 },
     principalFactory: (payload) => ({ userId: payload.userId }),
   });
+  const kit = createHonoSessionKit(coreKit);
 
   const app = new Hono();
-  app.use("*", toHonoMiddleware(kit.middleware()));
+  app.use("*", kit.middleware());
 
   app.post("/login", async (c) => {
-    const ctx = createHonoHttpContext(c);
-    const result = await kit.signIn(ctx, { userId: "u-int" });
+    const result = await kit.signIn(c, { userId: "u-int" });
     return c.json({ ok: true, me: result.principal });
   });
 
-  app.get("/me", toHonoMiddleware(kit.requireAuth()), (c) => {
-    const ctx = createHonoHttpContext(c);
-    const auth = kit.getAuth(ctx);
+  app.get("/me", kit.requireAuth(), (c) => {
+    const auth = kit.getAuth(c);
     return c.json({ me: auth.principal });
   });
 
   app.post("/logout", async (c) => {
-    const ctx = createHonoHttpContext(c);
-    await kit.signOut(ctx);
+    await kit.signOut(c);
     return c.json({ ok: true });
   });
 
   app.get("/cookie-twice", (c) => {
-    const ctx = createHonoHttpContext(c);
+    const ctx = kit.context(c);
     ctx.setCookie("sid", "abc", { path: "/", httpOnly: true });
     ctx.clearCookie("sid", { path: "/", httpOnly: true });
     return c.json({ ok: true });

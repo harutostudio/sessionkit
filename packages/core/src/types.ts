@@ -3,6 +3,7 @@ import type {SessionStore, StoredSession} from "./store/SessionStore";
 import type {HttpContext, HttpMiddleware} from "./http/HttpContext";
 import type {ErrorCode, Logger} from "./errors";
 import type {LockProvider} from "./session/LockProvider";
+import { SessionKit } from "./SessionKit";
 
 /**
  * Authentication state attached to each request context.

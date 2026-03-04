@@ -1,7 +1,13 @@
 import {
+  type AuthContext,
   defaultErrorBody,
   isSessionKitError,
+  type RequireAuthOptions,
   SessionKitError,
+  SessionKit,
+  type SignInOptions,
+  type SignInResult,
+  type SignOutOptions,
   statusFromErrorCode,
   type HttpContext,
   type HttpMiddleware,
@@ -41,6 +47,25 @@ export type SessionKitExpressHandler = (
  */
 export type SessionKitExpressAdapterOptions = {
   onError?: (error: SessionKitError, req: SessionKitExpressRequest, res: SessionKitExpressResponse) => Promise<void> | void;
+};
+
+/**
+ * Adapter-bound SessionKit facade for Express applications.
+ */
+export type ExpressSessionKit<TPayload, TPrincipal> = {
+  readonly core: SessionKit<TPayload, TPrincipal>;
+  context(req: SessionKitExpressRequest, res: SessionKitExpressResponse): HttpContext;
+  middleware(options?: SessionKitExpressAdapterOptions): SessionKitExpressHandler;
+  optionalAuth(options?: SessionKitExpressAdapterOptions): SessionKitExpressHandler;
+  requireAuth(requireAuthOptions?: RequireAuthOptions, options?: SessionKitExpressAdapterOptions): SessionKitExpressHandler;
+  signIn(
+    req: SessionKitExpressRequest,
+    res: SessionKitExpressResponse,
+    payload: TPayload,
+    options?: SignInOptions,
+  ): Promise<SignInResult<TPrincipal>>;
+  signOut(req: SessionKitExpressRequest, res: SessionKitExpressResponse, options?: SignOutOptions): Promise<void>;
+  getAuth(req: SessionKitExpressRequest, res: SessionKitExpressResponse): AuthContext<TPayload, TPrincipal>;
 };
 
 /**
@@ -141,6 +166,42 @@ export function toExpressMiddleware(
 
       next(error);
     }
+  };
+}
+
+/**
+ * Binds a core SessionKit instance to Express adapter utilities.
+ */
+export function createExpressSessionKit<TPayload, TPrincipal>(
+  core: SessionKit<TPayload, TPrincipal>,
+  options?: SessionKitExpressAdapterOptions,
+): ExpressSessionKit<TPayload, TPrincipal> {
+  const resolveAdapterOptions = (override?: SessionKitExpressAdapterOptions): SessionKitExpressAdapterOptions | undefined =>
+    override ?? options;
+
+  return {
+    core,
+    context(req, res) {
+      return createExpressHttpContext(req, res);
+    },
+    middleware(overrideOptions) {
+      return toExpressMiddleware(core.middleware(), resolveAdapterOptions(overrideOptions));
+    },
+    optionalAuth(overrideOptions) {
+      return toExpressMiddleware(core.optionalAuth(), resolveAdapterOptions(overrideOptions));
+    },
+    requireAuth(requireAuthOptions, overrideOptions) {
+      return toExpressMiddleware(core.requireAuth(requireAuthOptions), resolveAdapterOptions(overrideOptions));
+    },
+    signIn(req, res, payload, signInOptions) {
+      return core.signIn(createExpressHttpContext(req, res), payload, signInOptions);
+    },
+    signOut(req, res, signOutOptions) {
+      return core.signOut(createExpressHttpContext(req, res), signOutOptions);
+    },
+    getAuth(req, res) {
+      return core.getAuth(createExpressHttpContext(req, res));
+    },
   };
 }
 

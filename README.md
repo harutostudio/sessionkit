@@ -60,7 +60,7 @@ This example demonstrates:
 ```ts
 import express from "express";
 import { MapSessionStore, SessionKit } from "@sessionkit/core";
-import { createExpressHttpContext, toExpressMiddleware } from "@sessionkit/express";
+import { createExpressSessionKit } from "@sessionkit/express";
 
 type SessionPayload = {
   userId: string;
@@ -72,7 +72,7 @@ type Principal = {
   role: "user" | "admin";
 };
 
-const sessionKit = new SessionKit<SessionPayload, Principal>({
+const coreKit = new SessionKit<SessionPayload, Principal>({
   store: new MapSessionStore<SessionPayload>({
     cleanupIntervalSeconds: 60,
     maxSize: 10000,
@@ -99,19 +99,20 @@ const sessionKit = new SessionKit<SessionPayload, Principal>({
     },
   },
 });
+const sessionKit = createExpressSessionKit(coreKit);
 
 const app = express();
 app.use(express.json());
 
 // 1) Hydrate auth context for every request.
-app.use(toExpressMiddleware(sessionKit.middleware()));
+app.use(sessionKit.middleware());
 
 // 2) Login endpoint.
 app.post("/login", async (req, res, next) => {
   try {
-    const ctx = createExpressHttpContext(req, res);
     const result = await sessionKit.signIn(
-      ctx,
+      req,
+      res,
       { userId: "u_001", role: "user" },
       { ttlSeconds: 3600, hydrateContext: true },
     );
@@ -124,7 +125,7 @@ app.post("/login", async (req, res, next) => {
 // 3) Protected endpoint.
 app.get(
   "/me",
-  toExpressMiddleware(sessionKit.requireAuth()),
+  sessionKit.requireAuth(),
   (req, res) => {
     res.json({ auth: req.auth });
   },
@@ -133,8 +134,7 @@ app.get(
 // 4) Logout endpoint.
 app.post("/logout", async (req, res, next) => {
   try {
-    const ctx = createExpressHttpContext(req, res);
-    await sessionKit.signOut(ctx, { alwaysClearCookie: true });
+    await sessionKit.signOut(req, res, { alwaysClearCookie: true });
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -174,8 +174,11 @@ const kit = new SessionKit<Payload, Principal>({
 Creates middleware that resolves session state from cookie + store and hydrates auth context for the current request.
 
 ```ts
-// place early so downstream handlers can read auth context
+// core instance + adapter conversion
 app.use(toExpressMiddleware(kit.middleware()));
+
+// adapter-bound instance (recommended)
+app.use(sessionKit.middleware());
 ```
 
 ### optionalAuth()
@@ -183,8 +186,11 @@ app.use(toExpressMiddleware(kit.middleware()));
 Creates middleware equivalent to `middleware()`. This is an intent-oriented alias when authentication is optional.
 
 ```ts
-// same behavior as middleware(), clearer route intent naming
+// core instance + adapter conversion
 app.use(toExpressMiddleware(kit.optionalAuth()));
+
+// adapter-bound instance (recommended)
+app.use(sessionKit.optionalAuth());
 ```
 
 ### requireAuth([options])
@@ -197,6 +203,7 @@ Creates middleware that enforces authenticated access. If the request is unauthe
 
 ```ts
 app.get("/private", toExpressMiddleware(kit.requireAuth()), handler);
+app.get("/private", sessionKit.requireAuth(), handler);
 
 app.get(
   "/private-custom",
@@ -496,6 +503,21 @@ const clearHeader = serializeClearCookie("sid", { path: "/" });
 
 ### `@sessionkit/express`
 
+#### Function: `createExpressSessionKit(core, [options])`
+
+Binds a core `SessionKit` instance to Express so you can use `sessionKit.middleware()` directly and avoid creating context manually in each handler.
+
+```ts
+const coreKit = new SessionKit<Payload, Principal>({ store, session: { ttlSeconds: 3600 }, principalFactory });
+const sessionKit = createExpressSessionKit(coreKit);
+
+app.use(sessionKit.middleware());
+app.get("/private", sessionKit.requireAuth(), (req, res) => {
+  const auth = sessionKit.getAuth(req, res);
+  res.json({ me: auth.principal });
+});
+```
+
 #### Type: `SessionKitExpressRequest`
 
 Defines minimal request shape required by the Express adapter.
@@ -587,6 +609,21 @@ app.use(
     },
   }),
 );
+```
+
+#### Function: `createHonoSessionKit(core, [options])`
+
+Binds a core `SessionKit` instance to Hono so handlers can use `sessionKit.middleware()` and `sessionKit.signIn(c, ...)` directly.
+
+```ts
+const coreKit = new SessionKit<Payload, Principal>({ store, session: { ttlSeconds: 3600 }, principalFactory });
+const sessionKit = createHonoSessionKit(coreKit);
+
+app.use("*", sessionKit.middleware());
+app.get("/private", sessionKit.requireAuth(), (c) => {
+  const auth = sessionKit.getAuth(c);
+  return c.json({ me: auth.principal });
+});
 ```
 
 #### Function: `createHonoHttpContext(c)`
